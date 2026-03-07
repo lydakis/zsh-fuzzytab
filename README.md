@@ -2,8 +2,6 @@
 
 ![zsh-fuzzytab demo](assets/demo.gif)
 
-Type `gst`, press `Tab`, and the command expands to `git status`.
-
 `zsh-fuzzytab` turns `Tab` into fuzzy history recall for zsh.
 
 Type part of a command, press `Tab`, and the shell expands to the best matching entry from your history. If there is no match, or `fzf` is not available, it falls back to normal completion.
@@ -106,11 +104,6 @@ Run the test suite:
 ```zsh
 zsh tests/run.zsh
 ```
-
-README demo assets:
-
-- `assets/demo.cast` is the source recording captured with `asciinema`
-- `assets/demo.gif` is the rendered animation generated from that cast
 
 ## Publishing checklist
 
