@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show zsh version
+        run: zsh --version
+
+      - name: Syntax check
+        run: zsh -n fuzzy-tab.plugin.zsh zsh-fuzzytab.plugin.zsh fuzzy-tab.zsh tests/run.zsh
+
+      - name: Run tests
+        run: zsh tests/run.zsh
