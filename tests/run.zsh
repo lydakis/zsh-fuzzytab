@@ -30,8 +30,27 @@ while (( $# > 0 )); do
   esac
 done
 
+fuzzy_match() {
+  local needle="${1:l}"
+  local haystack="${2:l}"
+  local i=1
+  local char
+
+  [[ -z "$needle" ]] && return 0
+
+  for (( ; i <= ${#needle}; i++ )); do
+    char="${needle[i]}"
+    if [[ "$haystack" != *"$char"* ]]; then
+      return 1
+    fi
+    haystack="${haystack#*${char}}"
+  done
+
+  return 0
+}
+
 while IFS= read -r line; do
-  if [[ -z "$query" || "$line" == *"$query"* ]]; then
+  if fuzzy_match "$query" "$line"; then
     print -r -- "$line"
   fi
 done
@@ -56,6 +75,16 @@ reset_test_state() {
   typeset -g _FUZZY_TAB_ACTIVE_BINDKEY=""
   typeset -gA _FUZZY_TAB_BOUND_KEYS=()
   typeset -gA _FUZZY_TAB_PREVIOUS_WIDGETS=()
+  typeset -ga _FUZZY_TAB_LAST_MATCHES=()
+  typeset -g _FUZZY_TAB_LAST_QUERY=""
+  typeset -g _FUZZY_TAB_LAST_SUFFIX=""
+  typeset -g _FUZZY_TAB_LAST_SELECTED_LEFT=""
+  typeset -g _FUZZY_TAB_LAST_SELECTED_BUFFER=""
+  typeset -gi _FUZZY_TAB_LAST_INDEX=-1
+  typeset -gA _FUZZY_TAB_LEARNED=()
+  typeset -gi _FUZZY_TAB_LEARNED_LOADED=0
+  FUZZY_TAB_LEARNING_FILE="$TMP_DIR/learned.tsv"
+  command rm -f "$FUZZY_TAB_LEARNING_FILE"
 }
 
 assert_eq() {
@@ -73,18 +102,28 @@ assert_eq() {
   fi
 }
 
-test_history_selection_returns_newest_unique_match() {
+test_history_matches_return_newest_unique_match() {
   reset_test_state
 
   function fc() {
     print -r -- "  44 git status"
-    print -r -- "  43 docker logs api"
+    print -r -- "  43 git stash"
     print -r -- "  42 git status"
     print -r -- "  41 npm test"
   }
 
-  local selection="$(_fuzzy_tab_history_selection "git")"
-  assert_eq "git status" "$selection" "history selection should dedupe and keep the newest command"
+  local matches=("${(@f)$(_fuzzy_tab_history_matches "git st")}")
+  assert_eq "git status|git stash" "${(j:|:)matches}" "history matches should dedupe and keep newest-first results"
+}
+
+test_rank_matches_prefers_learned_selection() {
+  reset_test_state
+
+  _FUZZY_TAB_LEARNED[$(_fuzzy_tab_query_key "bfmt")]="bb format"
+  _FUZZY_TAB_LEARNED_LOADED=1
+
+  local ranked=("${(@f)$(_fuzzy_tab_rank_matches "BFMT" "buffer format" "bb format" "build fmt")}")
+  assert_eq "bb format|buffer format|build fmt" "${(j:|:)ranked}" "ranker should move the learned selection to the front for the same query"
 }
 
 test_expand_updates_buffer_and_cursor() {
@@ -105,6 +144,34 @@ test_expand_updates_buffer_and_cursor() {
   assert_eq "docker logs api" "$BUFFER" "widget should replace the buffer with the selected history entry"
   assert_eq "15" "$CURSOR" "cursor should move to the end of the selected command"
   assert_eq "" "$TEST_FALLBACK_CALL" "fallback widget should not run when a fuzzy match exists"
+}
+
+test_repeated_tab_cycles_through_matches() {
+  reset_test_state
+
+  function fc() {
+    print -r -- "  30 bb format"
+    print -r -- "  29 buffer format"
+    print -r -- "  28 build fmt"
+  }
+
+  function zle() {
+    TEST_FALLBACK_CALL="$*"
+  }
+
+  LBUFFER="bfmt"
+  _fuzzy_tab_expand
+  assert_eq "bb format" "$BUFFER" "first tab should still use the top-ranked match"
+
+  _fuzzy_tab_expand
+  assert_eq "buffer format" "$BUFFER" "second tab should cycle to the next fuzzy match"
+
+  _fuzzy_tab_expand
+  assert_eq "build fmt" "$BUFFER" "third tab should cycle through the remaining fuzzy matches"
+
+  _fuzzy_tab_expand
+  assert_eq "bb format" "$BUFFER" "cycling should wrap around after the final match"
+  assert_eq "" "$TEST_FALLBACK_CALL" "cycling should not fall back while matches are available"
 }
 
 test_expand_preserves_right_buffer_on_match() {
@@ -186,6 +253,17 @@ test_expand_falls_back_when_no_match_exists() {
   _fuzzy_tab_expand
 
   assert_eq "expand-or-complete" "$TEST_FALLBACK_CALL" "no fuzzy match should fall back to the configured completion widget"
+}
+
+test_commit_learning_persists_last_selected_match() {
+  reset_test_state
+
+  _FUZZY_TAB_LAST_QUERY="bfmt"
+  BUFFER="bb format"
+  _fuzzy_tab_commit_learning
+
+  assert_eq "bb format" "$(_fuzzy_tab_preferred_match "BFMT")" "accepting a cycled selection should persist it as the preferred future match"
+  assert_eq "" "$_FUZZY_TAB_LAST_QUERY" "committing learning should clear the active cycle state"
 }
 
 test_expand_falls_back_to_existing_widget_binding() {
@@ -391,12 +469,15 @@ test_repo_named_plugin_entrypoint_loads_primary_plugin() {
   assert_eq $'fuzzy_tab_bind: function\n1' "$output" "repo-named plugin entrypoint should source the main plugin file"
 }
 
-test_history_selection_returns_newest_unique_match
+test_history_matches_return_newest_unique_match
+test_rank_matches_prefers_learned_selection
 test_expand_updates_buffer_and_cursor
+test_repeated_tab_cycles_through_matches
 test_expand_preserves_right_buffer_on_match
 test_expand_does_not_duplicate_existing_suffix
 test_expand_falls_back_on_empty_query
 test_expand_falls_back_when_no_match_exists
+test_commit_learning_persists_last_selected_match
 test_expand_falls_back_to_existing_widget_binding
 test_expand_with_empty_history_stays_quiet
 test_bind_registers_widget_and_key

@@ -83,6 +83,12 @@ FUZZY_TAB_COMPLETION_WIDGET=expand-or-complete
 # Optional: pass extra flags to fzf
 typeset -ga FUZZY_TAB_FZF_OPTS=(--tiebreak=index)
 
+# Optional: disable remembering which match you accepted for a query
+FUZZY_TAB_LEARNING_ENABLED=0
+
+# Optional: change where learned query preferences are stored
+FUZZY_TAB_LEARNING_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/zsh-fuzzytab/selections.tsv"
+
 source /path/to/zsh-fuzzytab/fuzzy-tab.plugin.zsh
 
 # Optional manual bind when auto-bind is disabled
@@ -94,7 +100,9 @@ fuzzy_tab_bind '^I'
 - The current left-side buffer (`LBUFFER`) is used as the fuzzy query.
 - History is read newest-first via `fc -rl 1`.
 - Duplicate commands are removed so repeated commands do not crowd results.
-- The first fuzzy hit is inserted into the command line.
+- The first `Tab` inserts the top fuzzy hit into the command line.
+- Pressing `Tab` again cycles through the remaining matches for the original query.
+- When you accept a cycled match with `Enter`, that choice is remembered and ranked first the next time you use the same query.
 - If the buffer is empty, there is no match, or `fzf` is unavailable, normal completion runs instead.
 
 ## Development

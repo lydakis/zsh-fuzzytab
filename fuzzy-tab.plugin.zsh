@@ -8,11 +8,112 @@ typeset -g _FUZZY_TAB_PLUGIN_LOADED=1
 : "${FUZZY_TAB_COMPLETION_WIDGET:=expand-or-complete}"
 : "${FUZZY_TAB_DISABLE_AUTO_BIND:=0}"
 : "${FUZZY_TAB_FZF_BIN:=fzf}"
+: "${FUZZY_TAB_LEARNING_ENABLED:=1}"
+: "${FUZZY_TAB_LEARNING_FILE:=${XDG_STATE_HOME:-$HOME/.local/state}/zsh-fuzzytab/selections.tsv}"
 typeset -ga FUZZY_TAB_FZF_OPTS
 typeset -ga _FUZZY_TAB_KEYMAPS=(main emacs viins)
 typeset -g _FUZZY_TAB_ACTIVE_BINDKEY=""
 typeset -gA _FUZZY_TAB_BOUND_KEYS
 typeset -gA _FUZZY_TAB_PREVIOUS_WIDGETS
+typeset -ga _FUZZY_TAB_LAST_MATCHES=()
+typeset -g _FUZZY_TAB_LAST_QUERY=""
+typeset -g _FUZZY_TAB_LAST_SUFFIX=""
+typeset -g _FUZZY_TAB_LAST_SELECTED_LEFT=""
+typeset -g _FUZZY_TAB_LAST_SELECTED_BUFFER=""
+typeset -gi _FUZZY_TAB_LAST_INDEX=-1
+typeset -gA _FUZZY_TAB_LEARNED
+typeset -gi _FUZZY_TAB_LEARNED_LOADED=0
+
+_fuzzy_tab_reset_state() {
+  _FUZZY_TAB_LAST_MATCHES=()
+  _FUZZY_TAB_LAST_QUERY=""
+  _FUZZY_TAB_LAST_SUFFIX=""
+  _FUZZY_TAB_LAST_SELECTED_LEFT=""
+  _FUZZY_TAB_LAST_SELECTED_BUFFER=""
+  _FUZZY_TAB_LAST_INDEX=-1
+}
+
+_fuzzy_tab_query_key() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  local query="${1-}"
+  query="${query//$'\n'/ }"
+  query="${query//$'\r'/ }"
+  query="${query//$'\t'/ }"
+
+  print -r -- "${query:l}"
+}
+
+_fuzzy_tab_load_learning() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  local line
+  local key
+  local command
+
+  (( _FUZZY_TAB_LEARNED_LOADED )) && return 0
+  _FUZZY_TAB_LEARNED_LOADED=1
+
+  [[ "${FUZZY_TAB_LEARNING_ENABLED:-1}" == "1" ]] || return 0
+  [[ -r "${FUZZY_TAB_LEARNING_FILE:-}" ]] || return 0
+
+  while IFS=$'\t' read -r key command; do
+    [[ -n "$key" && -n "$command" ]] || continue
+    _FUZZY_TAB_LEARNED[$key]="$command"
+  done < "$FUZZY_TAB_LEARNING_FILE"
+}
+
+_fuzzy_tab_write_learning() {
+  emulate -L zsh
+  setopt localoptions no_aliases pipe_fail
+
+  local file="${FUZZY_TAB_LEARNING_FILE:-}"
+  local dir="${file:h}"
+  local key
+
+  [[ "${FUZZY_TAB_LEARNING_ENABLED:-1}" == "1" ]] || return 0
+  [[ -n "$file" ]] || return 0
+
+  command mkdir -p "$dir" || return 1
+  : >| "$file" || return 1
+
+  for key in "${(@k)_FUZZY_TAB_LEARNED}"; do
+    print -r -- "${key}"$'\t'"${_FUZZY_TAB_LEARNED[$key]}" >>| "$file" || return 1
+  done
+}
+
+_fuzzy_tab_remember_selection() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  local query_key
+  local command="${2-}"
+
+  [[ "${FUZZY_TAB_LEARNING_ENABLED:-1}" == "1" ]] || return 0
+  query_key="$(_fuzzy_tab_query_key "${1-}")"
+  [[ -n "$query_key" && -n "$command" ]] || return 0
+
+  _fuzzy_tab_load_learning
+  _FUZZY_TAB_LEARNED[$query_key]="$command"
+  _fuzzy_tab_write_learning
+}
+
+_fuzzy_tab_preferred_match() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  local query_key
+
+  [[ "${FUZZY_TAB_LEARNING_ENABLED:-1}" == "1" ]] || return 1
+  query_key="$(_fuzzy_tab_query_key "${1-}")"
+  [[ -n "$query_key" ]] || return 1
+
+  _fuzzy_tab_load_learning
+  [[ -n "${_FUZZY_TAB_LEARNED[$query_key]-}" ]] || return 1
+  print -r -- "${_FUZZY_TAB_LEARNED[$query_key]}"
+}
 
 _fuzzy_tab_binding_key() {
   print -r -- "${1}:${2}"
@@ -98,7 +199,7 @@ _fuzzy_tab_has_fzf() {
   (( ${+commands[$fzf_bin]} ))
 }
 
-_fuzzy_tab_history_selection() {
+_fuzzy_tab_history_matches() {
   emulate -L zsh
   setopt localoptions pipe_fail no_aliases
 
@@ -117,8 +218,72 @@ _fuzzy_tab_history_selection() {
   fc -rl 1 \
     | command sed 's/^[[:space:]]*[0-9][0-9]*[[:space:]]*//' \
     | command awk '!seen[$0]++' \
-    | "$fzf_bin" --scheme=history "${fzf_opts[@]}" --filter "$query" 2>/dev/null \
-    | command sed -n '1p'
+    | "$fzf_bin" --scheme=history "${fzf_opts[@]}" --filter "$query" 2>/dev/null
+}
+
+_fuzzy_tab_rank_matches() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  local query="${1-}"
+  shift
+
+  local preferred
+  local match
+  local -a matches ranked
+
+  matches=("$@")
+  preferred="$(_fuzzy_tab_preferred_match "$query")" || true
+
+  if [[ -n "$preferred" ]]; then
+    for match in "${matches[@]}"; do
+      [[ "$match" == "$preferred" ]] || continue
+      ranked+=("$match")
+      break
+    done
+  fi
+
+  for match in "${matches[@]}"; do
+    [[ "$match" == "$preferred" ]] && continue
+    ranked+=("$match")
+  done
+
+  print -r -- "${(@F)ranked}"
+}
+
+_fuzzy_tab_apply_match() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  local selected="${1-}"
+  local suffix="${2-}"
+  local selected_left="$selected"
+
+  if [[ -n "$suffix" && "$selected" == *"$suffix" ]]; then
+    selected_left="${selected[1,$(( ${#selected} - ${#suffix} ))]}"
+  fi
+
+  BUFFER="${selected_left}${suffix}"
+  LBUFFER="$selected_left"
+  RBUFFER="$suffix"
+  CURSOR=${#selected_left}
+  _FUZZY_TAB_LAST_SELECTED_LEFT="$selected_left"
+  _FUZZY_TAB_LAST_SELECTED_BUFFER="$BUFFER"
+}
+
+_fuzzy_tab_commit_learning() {
+  emulate -L zsh
+  setopt localoptions no_aliases
+
+  [[ -n "${_FUZZY_TAB_LAST_QUERY-}" ]] || return 0
+  [[ -n "${BUFFER-}" ]] || return 0
+
+  _fuzzy_tab_remember_selection "$_FUZZY_TAB_LAST_QUERY" "$BUFFER"
+  _fuzzy_tab_reset_state
+}
+
+_fuzzy_tab_line_finish() {
+  _fuzzy_tab_commit_learning
 }
 
 _fuzzy_tab_expand() {
@@ -126,31 +291,46 @@ _fuzzy_tab_expand() {
   setopt localoptions no_aliases
 
   local query="${LBUFFER:-}"
-  local selected
-  local selected_left
   local suffix="${RBUFFER-}"
+  local selected
+  local ranked_matches
+  local -a matches
 
   if [[ -z "${query//[[:space:]]/}" ]]; then
+    _fuzzy_tab_reset_state
     _fuzzy_tab_fallback
     return 0
   fi
 
-  selected="$(_fuzzy_tab_history_selection "$query")"
-
-  if [[ -n "$selected" ]]; then
-    selected_left="$selected"
-
-    if [[ -n "$suffix" && "$selected" == *"$suffix" ]]; then
-      selected_left="${selected[1,$(( ${#selected} - ${#suffix} ))]}"
-    fi
-
-    BUFFER="${selected_left}${suffix}"
-    LBUFFER="$selected_left"
-    RBUFFER="$suffix"
-    CURSOR=${#selected_left}
+  if [[ -n "${_FUZZY_TAB_LAST_QUERY-}" \
+    && "$query" == "${_FUZZY_TAB_LAST_SELECTED_LEFT-}" \
+    && "$suffix" == "${_FUZZY_TAB_LAST_SUFFIX-}" \
+    && ${#_FUZZY_TAB_LAST_MATCHES[@]} -gt 0 ]]; then
+    _FUZZY_TAB_LAST_INDEX=$(( (_FUZZY_TAB_LAST_INDEX + 1) % ${#_FUZZY_TAB_LAST_MATCHES[@]} ))
+    selected="${_FUZZY_TAB_LAST_MATCHES[_FUZZY_TAB_LAST_INDEX + 1]}"
+    _fuzzy_tab_apply_match "$selected" "$suffix"
     return 0
   fi
 
+  matches=("${(@f)$(_fuzzy_tab_history_matches "$query")}")
+  matches=("${(@)matches:#}")
+  if (( ${#matches[@]} )); then
+    ranked_matches=("$(_fuzzy_tab_rank_matches "$query" "${matches[@]}")")
+    matches=("${(@f)ranked_matches}")
+    matches=("${(@)matches:#}")
+  fi
+
+  if (( ${#matches[@]} )); then
+    selected="${matches[1]}"
+    _FUZZY_TAB_LAST_MATCHES=("${matches[@]}")
+    _FUZZY_TAB_LAST_QUERY="$query"
+    _FUZZY_TAB_LAST_SUFFIX="$suffix"
+    _FUZZY_TAB_LAST_INDEX=0
+    _fuzzy_tab_apply_match "$selected" "$suffix"
+    return 0
+  fi
+
+  _fuzzy_tab_reset_state
   _fuzzy_tab_fallback
 }
 
@@ -200,5 +380,9 @@ fuzzy_tab_unbind() {
 }
 
 if [[ -o interactive && "${FUZZY_TAB_DISABLE_AUTO_BIND:-0}" != "1" ]]; then
+  autoload -Uz add-zle-hook-widget 2>/dev/null || true
+  if whence -w add-zle-hook-widget >/dev/null 2>&1; then
+    add-zle-hook-widget line-finish _fuzzy_tab_line_finish
+  fi
   fuzzy_tab_bind
 fi
