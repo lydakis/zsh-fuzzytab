@@ -115,6 +115,7 @@ If your terminal sends a different sequence for `Shift-Tab`, set `FUZZY_TAB_REVE
 - Pressing `Shift-Tab` cycles backward through the current fuzzy-tab match set.
 - Pressing `Ctrl-R` during an active fuzzy-tab cycle opens interactive `fzf` history search seeded with the original query.
 - Pressing `Ctrl-R` without an active fuzzy-tab cycle falls back to your existing `Ctrl-R` widget.
+- Accepting a `Ctrl-R` refinement still teaches the original fuzzy-tab query which command you meant.
 - When you accept a cycled match with `Enter`, that choice is remembered and ranked first the next time you use the same query.
 - If the buffer is empty, there is no match, or `fzf` is unavailable, normal completion runs instead.
 
@@ -129,7 +130,7 @@ zsh tests/run.zsh
 ## Publishing checklist
 
 1. Push this repo to GitHub.
-2. Create a `v1.0.0` tag and GitHub release.
+2. Push a version tag like `v1.2.0`; GitHub will create the matching release automatically.
 3. Add the repo to your preferred zsh plugin lists if you want directory-level discovery.
 4. Keep the install snippets in this README aligned with the final repo slug.
 
