@@ -22,6 +22,7 @@ typeset -gA _FUZZY_TAB_BOUND_KEYS
 typeset -gA _FUZZY_TAB_PREVIOUS_WIDGETS
 typeset -ga _FUZZY_TAB_LAST_MATCHES=()
 typeset -g _FUZZY_TAB_LAST_QUERY=""
+typeset -g _FUZZY_TAB_LAST_LEARNING_QUERY=""
 typeset -g _FUZZY_TAB_LAST_SUFFIX=""
 typeset -g _FUZZY_TAB_LAST_SELECTED_LEFT=""
 typeset -g _FUZZY_TAB_LAST_SELECTED_BUFFER=""
@@ -32,6 +33,7 @@ typeset -gi _FUZZY_TAB_LEARNED_LOADED=0
 _fuzzy_tab_reset_state() {
   _FUZZY_TAB_LAST_MATCHES=()
   _FUZZY_TAB_LAST_QUERY=""
+  _FUZZY_TAB_LAST_LEARNING_QUERY=""
   _FUZZY_TAB_LAST_SUFFIX=""
   _FUZZY_TAB_LAST_SELECTED_LEFT=""
   _FUZZY_TAB_LAST_SELECTED_BUFFER=""
@@ -323,6 +325,7 @@ _fuzzy_tab_set_active_matches() {
   local query="${1-}"
   local selected="${2-}"
   local suffix="${3-}"
+  local learning_query="${4-}"
   local ranked_matches
   local match
   local index=0
@@ -345,6 +348,7 @@ _fuzzy_tab_set_active_matches() {
     if [[ "$match" == "$selected" ]]; then
       _FUZZY_TAB_LAST_MATCHES=("${matches[@]}")
       _FUZZY_TAB_LAST_QUERY="$query"
+      _FUZZY_TAB_LAST_LEARNING_QUERY="${learning_query:-$query}"
       _FUZZY_TAB_LAST_SUFFIX="$suffix"
       _FUZZY_TAB_LAST_INDEX="$index"
       return 0
@@ -360,10 +364,10 @@ _fuzzy_tab_commit_learning() {
   emulate -L zsh
   setopt localoptions no_aliases
 
-  [[ -n "${_FUZZY_TAB_LAST_QUERY-}" ]] || return 0
+  [[ -n "${_FUZZY_TAB_LAST_LEARNING_QUERY-}" ]] || return 0
   [[ -n "${BUFFER-}" ]] || return 0
 
-  _fuzzy_tab_remember_selection "$_FUZZY_TAB_LAST_QUERY" "$BUFFER"
+  _fuzzy_tab_remember_selection "$_FUZZY_TAB_LAST_LEARNING_QUERY" "$BUFFER"
   _fuzzy_tab_reset_state
 }
 
@@ -409,6 +413,7 @@ _fuzzy_tab_expand() {
     selected="${matches[1]}"
     _FUZZY_TAB_LAST_MATCHES=("${matches[@]}")
     _FUZZY_TAB_LAST_QUERY="$query"
+    _FUZZY_TAB_LAST_LEARNING_QUERY="$query"
     _FUZZY_TAB_LAST_SUFFIX="$suffix"
     _FUZZY_TAB_LAST_INDEX=0
     _fuzzy_tab_apply_match "$selected" "$suffix"
@@ -493,7 +498,7 @@ _fuzzy_tab_search() {
 
   final_query="${final_query:-$query}"
   _fuzzy_tab_apply_match "$selected" "$suffix"
-  _fuzzy_tab_set_active_matches "$final_query" "$selected" "$suffix" || true
+  _fuzzy_tab_set_active_matches "$final_query" "$selected" "$suffix" "${_FUZZY_TAB_LAST_LEARNING_QUERY:-$query}" || true
   _FUZZY_TAB_CURRENT_WIDGET_KEY="$previous_widget_key"
 }
 

@@ -125,6 +125,7 @@ reset_test_state() {
   typeset -gA _FUZZY_TAB_PREVIOUS_WIDGETS=()
   typeset -ga _FUZZY_TAB_LAST_MATCHES=()
   typeset -g _FUZZY_TAB_LAST_QUERY=""
+  typeset -g _FUZZY_TAB_LAST_LEARNING_QUERY=""
   typeset -g _FUZZY_TAB_LAST_SUFFIX=""
   typeset -g _FUZZY_TAB_LAST_SELECTED_LEFT=""
   typeset -g _FUZZY_TAB_LAST_SELECTED_BUFFER=""
@@ -373,8 +374,37 @@ test_ctrl_r_search_selects_from_active_fuzzy_session() {
 
   assert_eq "build fmt" "$BUFFER" "ctrl-r handoff should apply the command chosen from interactive search"
   assert_eq "bui" "$_FUZZY_TAB_LAST_QUERY" "ctrl-r handoff should carry forward the refined search query"
+  assert_eq "bfmt" "$_FUZZY_TAB_LAST_LEARNING_QUERY" "ctrl-r handoff should keep the original shorthand as the learning key"
   assert_eq "0" "$_FUZZY_TAB_LAST_INDEX" "ctrl-r handoff should keep cycling state aligned with the selected search result"
   assert_eq "" "$TEST_FALLBACK_CALL" "ctrl-r handoff should not fall back when a fuzzy cycle is active"
+
+  unset FZF_STUB_SELECTION
+  unset FZF_STUB_FINAL_QUERY
+}
+
+test_ctrl_r_commit_learning_uses_original_query() {
+  reset_test_state
+
+  function fc() {
+    print -r -- "  30 bb format"
+    print -r -- "  29 buffer format"
+    print -r -- "  28 build fmt"
+  }
+
+  function zle() {
+    TEST_FALLBACK_CALL="$*"
+  }
+
+  export FZF_STUB_SELECTION="build fmt"
+  export FZF_STUB_FINAL_QUERY="bui"
+  LBUFFER="bfmt"
+
+  _fuzzy_tab_expand
+  _fuzzy_tab_search
+  _fuzzy_tab_commit_learning
+
+  assert_eq "build fmt" "$(_fuzzy_tab_preferred_match "bfmt")" "ctrl-r handoff should learn against the original shorthand query"
+  assert_eq "" "$(_fuzzy_tab_preferred_match "bui")" "ctrl-r handoff should not overwrite learning for the refined ctrl-r query text"
 
   unset FZF_STUB_SELECTION
   unset FZF_STUB_FINAL_QUERY
@@ -404,11 +434,13 @@ test_commit_learning_persists_last_selected_match() {
   reset_test_state
 
   _FUZZY_TAB_LAST_QUERY="bfmt"
+  _FUZZY_TAB_LAST_LEARNING_QUERY="bfmt"
   BUFFER="bb format"
   _fuzzy_tab_commit_learning
 
   assert_eq "bb format" "$(_fuzzy_tab_preferred_match "BFMT")" "accepting a cycled selection should persist it as the preferred future match"
   assert_eq "" "$_FUZZY_TAB_LAST_QUERY" "committing learning should clear the active cycle state"
+  assert_eq "" "$_FUZZY_TAB_LAST_LEARNING_QUERY" "committing learning should clear the learning key state"
 }
 
 test_expand_falls_back_to_existing_widget_binding() {
@@ -649,6 +681,7 @@ test_expand_falls_back_on_empty_query
 test_expand_falls_back_when_no_match_exists
 test_shift_tab_falls_back_without_active_cycle
 test_ctrl_r_search_selects_from_active_fuzzy_session
+test_ctrl_r_commit_learning_uses_original_query
 test_ctrl_r_falls_back_without_active_cycle
 test_commit_learning_persists_last_selected_match
 test_expand_falls_back_to_existing_widget_binding
