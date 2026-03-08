@@ -74,6 +74,14 @@ The plugin auto-binds `Tab` by default in interactive shells.
 # Optional: choose a different key
 FUZZY_TAB_BINDKEY='^G'
 
+# Optional: change or disable reverse cycling on Shift-Tab
+FUZZY_TAB_REVERSE_BINDKEY='^[[Z'
+# FUZZY_TAB_REVERSE_BINDKEY=''
+
+# Optional: change or disable interactive search handoff on Ctrl-R
+FUZZY_TAB_SEARCH_BINDKEY='^R'
+# FUZZY_TAB_SEARCH_BINDKEY=''
+
 # Optional: skip the auto-bind and wire it up yourself later
 FUZZY_TAB_DISABLE_AUTO_BIND=1
 
@@ -95,6 +103,8 @@ source /path/to/zsh-fuzzytab/fuzzy-tab.plugin.zsh
 fuzzy_tab_bind '^I'
 ```
 
+If your terminal sends a different sequence for `Shift-Tab`, set `FUZZY_TAB_REVERSE_BINDKEY` to that sequence.
+
 ## Behavior
 
 - The current left-side buffer (`LBUFFER`) is used as the fuzzy query.
@@ -102,6 +112,9 @@ fuzzy_tab_bind '^I'
 - Duplicate commands are removed so repeated commands do not crowd results.
 - The first `Tab` inserts the top fuzzy hit into the command line.
 - Pressing `Tab` again cycles through the remaining matches for the original query.
+- Pressing `Shift-Tab` cycles backward through the current fuzzy-tab match set.
+- Pressing `Ctrl-R` during an active fuzzy-tab cycle opens interactive `fzf` history search seeded with the original query.
+- Pressing `Ctrl-R` without an active fuzzy-tab cycle falls back to your existing `Ctrl-R` widget.
 - When you accept a cycled match with `Enter`, that choice is remembered and ranked first the next time you use the same query.
 - If the buffer is empty, there is no match, or `fzf` is unavailable, normal completion runs instead.
 
